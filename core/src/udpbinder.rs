@@ -1,7 +1,7 @@
 use std::env;
 use std::process;
-fn bindAddress(addr : String){
-    
+fn bindAddress(addr){
+    println!("Received {}", addr);
 }
 
 fn main(){
@@ -19,5 +19,5 @@ fn main(){
         println!("Usage: ./udpbinder <ip:port> <mode>");
         process::exit(0);
     }
-    // Debug output
+    bindAddress(address);
 }
