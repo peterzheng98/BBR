@@ -28,8 +28,9 @@ fn main(){
     const assumePackageSize : usize = 1024 - (1056 - 1024);
     let mut sentBuf = [0; assumePackageSize];
     // sentBuf[0, 1, 2, 3] indicates the protocol
-    // 00 00 00 00 -> Real UDP
-    // 01 00 00 00 -> Sim TCP
+    // 01 00 00 00 -> Real UDP
+    // 01 01 00 00 -> Sim TCP
+    sentBuf[0] = 1;
     // Here use little endian
     let mut currentIdx: usize = 4;
     let portInfo = sentPort.to_le_bytes();

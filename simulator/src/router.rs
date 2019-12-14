@@ -31,18 +31,31 @@ fn main(){
     let p2pPort2Addr = format!("127.0.0.1:{}", p2pPort2);
     let clientAddr = format!("127.0.0.1:{}", clientPort);
     let serverAddr = format!("127.0.0.1:{}", serverPort);
-
+    const assumePackageSize : usize = 1024 - (1056 - 1024);
     println!("Configuration:\np2pAddr:{} <-> {}, Port:{} <-> {}\nClientAddr:{}, Port:{}\nServerAddr:{}, Port: {}", p2pPort1Addr, p2pPort2Addr, p2pPort1, p2pPort2, clientAddr, clientPort, serverAddr, serverPort);
     //Define socket here
     let routerP2PSocket1 = UdpSocket::bind(format!("127.0.0.1:{}", p2pPort1));
     let routerP2PSocket2 = UdpSocket::bind(format!("127.0.0.1:{}", p2pPort2));
     let clientSocket = UdpSocket::bind(format!("127.0.0.1:{}", clientPort));
     let serverSocket = UdpSocket::bind(format!("127.0.0.1:{}", serverPort));
+    routerP2PSocket1.set_nonblocking(true).unwrap();
+    routerP2PSocket2.set_nonblocking(true).unwrap();
+    clientSocket.set_nonblocking(true).unwrap();
+    serverSocket.set_nonblocking(true).unwrap();
     println!("Socket Bind Success!");
     println!("<-- Ready to serve -->");
     // stimulate the internal queue of the router
     let mut internalQueue : collections::VecDeque<Vec(u8)> = collections::VecDeque::new();
+    let mut recvBuf1 = [0; assumePackageSize];
+    let mut recvBuf2 = [0; assumePackageSize];
+    let mut recvBuf3 = [0; assumePackageSize];
+    let mut recvBuf4 = [0; assumePackageSize];
     loop{
+        // Listen to client
+        let (amt1, src1) = routerP2PSocket1.recv_from(&mut recvBuf1).unwrap();
+        let (amt2, src2) = routerP2PSocket2.recv_from(&mut recvBuf2).unwrap();
+        let (amtC, srcC) = clientSocket.recv_from(&mut recvBuf3).unwrap();
+        let (amtS, srcS) = serverSocket.recv_from(&mut recvBuf4).unwrap();
         
     }
 
