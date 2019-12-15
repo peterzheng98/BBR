@@ -13,9 +13,11 @@ use std::time::{Duration, SystemTime};
 //                .. .. .. .. - Port 2
 //                00 - Basic Control Information
 
-fn packACK(ackNum: i32, target: i32, src: i32) -> &[u8]{
+fn packACK(ackNum: i32, target: i32, src: i32) -> [u8; (1024 + 30)]{
     let mut sentBuf = [0; (1024 + 30)];
     let seqInfo = ackNum.to_le_bytes();
+    let serverPortInfo = target.to_le_bytes();
+    let localPortInfo = src.to_le_bytes();
     // TCP Header
     sentBuf[0] = 1;
     sentBuf[1] = 1;
@@ -65,7 +67,11 @@ fn unpackSeq(packet : &[u8]) -> (i32, i32, i32, i32, i32){
         seqCount[iidx] = packet[idx];
         idx = idx + 1;
     }
-    seqFlag = packet[14];
+    if packet[14] == 1{
+        seqFlag = 1;
+    } else {
+        seqFlag = 0;
+    }
     println!("    = Unpacking Seq: Port and protocol: {} <--> {}, {}, ackflag {} acknum {}", i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(protocol), seqFlag, i32::from_le_bytes(seqCount));
     (i32::from_le_bytes(protocol), i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(seqCount), seqFlag)
 }
@@ -94,12 +100,12 @@ fn main(){
     let serverSocket = UdpSocket::bind(format!("127.0.0.1:{}", serverPort)).unwrap();
     let mut expectSeq : i32 = 0;
     let mut ackNum : i32 = 0;
-    let mut RecvBuf = [0; (1024 + 32)]
+    let mut RecvBuf = [0; (1024 + 32)];
     if mode == 2{
         loop{
             let (amt, src) = serverSocket.recv_from(&mut RecvBuf).unwrap();
-            let (protocol, port1, port2, seqCount, _) = unpackSeq(RecvBuf);
-            println!("  - Server receives {}->{} seqCount:{} realSrc:{:?}", port2, port1, seqCount, src)
+            let (protocol, port1, port2, seqCount, _) = unpackSeq(&RecvBuf);
+            println!("  - Server receives {}->{} seqCount:{} realSrc:{:?}", port2, port1, seqCount, src);
             let mut sentbuffer = packACK(seqCount, port2, port1);
             serverSocket.send_to(&sentbuffer, format!("127.0.0.1:{}", routerPort));
         }
