@@ -106,6 +106,7 @@ fn main(){
             // the receiver side only sent the package when the corresponding time is arrived.
             // Currently this is non-waiting time version
             let (amt, src) = clientSocket.recv_from(&mut recvBuf3).unwrap();
+            println!("3 - Receiving Package");
             let (protocol, targetPort, srcPort) = unpackHeader(&recvBuf3);
             if protocol == tcpProtocol {
                 clientSocket.send_to(&recvBuf3, format!("127.0.0.1:{}", targetPort));

@@ -93,14 +93,14 @@ fn main(){
     let serverPort : i32 = i32::from_str(&arguments[1]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
     let time : i32 = i32::from_str(&arguments[4]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
     let mode : i32 = i32::from_str(&arguments[5]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
-    println!("Configuration:\nLocal Port:{}<->Router:{}<->Server Port:{}\nDelay Time:{} Mode,1-BBR 2-Reno{}", clientPort, routerPort, serverPort, time, mode);
+    println!("Configuration:\nLocal Port:{}<->Router:{}<->Server Port:{}\nDelay Time:{} Mode,1-BBR 2-Reno: {}", clientPort, routerPort, serverPort, time, mode);
     println!("<-- Ready to run, Type any character for continuing -->");
     let mut inputControl = String::new();
     io::stdin().read_line(&mut inputControl).expect("IOError");
     let serverSocket = UdpSocket::bind(format!("127.0.0.1:{}", serverPort)).unwrap();
     let mut expectSeq : i32 = 0;
     let mut ackNum : i32 = 0;
-    let mut RecvBuf = [0; (1024 + 32)];
+    let mut RecvBuf = [0; 1024];
     if mode == 2{
         loop{
             let (amt, src) = serverSocket.recv_from(&mut RecvBuf).unwrap();

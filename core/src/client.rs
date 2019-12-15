@@ -37,7 +37,11 @@ fn unpackACK(packet : &[u8]) -> (i32, i32, i32, i32, i32){
         ackCount[iidx] = packet[idx];
         idx = idx + 1;
     }
-    ackFlag = packet[12];
+    if packet[12] == 1{
+        ackFlag = 1;
+    } else {
+        ackFlag = 0;
+    }
     println!("    = Unpacking ACK: Port and protocol: {} <--> {}, {}, ackflag {} acknum {}", i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(protocol), ackFlag, i32::from_le_bytes(ackCount));
     (i32::from_le_bytes(protocol), i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(ackCount), ackFlag)
 }
@@ -57,9 +61,9 @@ fn main(){
     let clientPort : i32 = i32::from_str(&arguments[1]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
     let routerPort : i32 = i32::from_str(&arguments[2]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
     let serverPort : i32 = i32::from_str(&arguments[3]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
-    let time : i32 = i32::from_str(&arguments[4]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
+    let time : u32 = u32::from_str(&arguments[4]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
     let mode : i32 = i32::from_str(&arguments[5]).expect("Usage ./Client <Client Port> <Router Port> <Server Port> <Time> <Mode, 1=BBR, 2=Reno>");
-    println!("Configuration:\nLocal Port:{}<->Router:{}<->Server Port:{}\nDelay Time:{} Mode,1-BBR 2-Reno{}", clientPort, routerPort, serverPort, time, mode);
+    println!("Configuration:\nLocal Port:{}<->Router:{}<->Server Port:{}\nDelay Time:{} Mode,1-BBR 2-Reno: {}", clientPort, routerPort, serverPort, time, mode);
     println!("<-- Ready to run, Type any character for continuing -->");
     let mut inputControl = String::new();
     io::stdin().read_line(&mut inputControl).expect("IOError");
@@ -79,9 +83,9 @@ fn main(){
             // sent packet with 
             let localPortInfo = clientPort.to_le_bytes();
             let serverPortInfo = serverPort.to_le_bytes();
+            cwndCount = cwnd;
             while cwndCount > 0{
-                let mut sentBuf = [0; (1024 + 32)];
-
+                let mut sentBuf = [0; 1024];
                 let seqInfo = seqNum.to_le_bytes();
                 // TCP Header
                 sentBuf[0] = 1;
@@ -105,7 +109,7 @@ fn main(){
                     sentBuf[currentIdx] = *i;
                     currentIdx = currentIdx + 1;
                 }
-                thread::sleep(Duration::new(0, time * 1000));
+                // thread::sleep(Duration::new(0, time * 1000));
                 clientSocket.send_to(&sentBuf, format!("127.0.0.1:{}", routerPort));
                 println!("    - Client sent package with seq {}", seqNum);
                 seqNum = seqNum + 1;
@@ -115,14 +119,15 @@ fn main(){
             let mut success_recv : bool = false;
             let mut duplicated : bool = false;
             let mut receivedACK : collections::BTreeMap<i32, i32> = collections::BTreeMap::new();
-            let mut RecvBuf = [0; (1024 + 32)];
-            while wait_ack_timeout.elapsed().unwrap().as_secs() < 5 && (!success_recv) {
+            let mut RecvBuf = [0; 1024];
+            while wait_ack_timeout.elapsed().unwrap().as_secs() < 2 && (!success_recv) {
                 // set for timeout
-                let (amt, src) = clientPort.recv_from(&mut RecvBuf).unwrap();
+                let (amt, src) = clientSocket.recv_from(&mut RecvBuf).unwrap();
                 let (protocol, port1, port2, ackCount, ackFlag) = unpackACK(&RecvBuf);
                 if protocol == tcpProtocol{
                     if ackCount == expectedAckNum{
                         expectedAckNum = expectedAckNum + 1;
+                        success_recv = true;
                     } else {
                         if !receivedACK.contains_key(&ackCount) {
                             receivedACK.insert(ackCount, 1);
@@ -163,7 +168,7 @@ fn main(){
                 cwnd = ssthresh;
                 println!("  ! 3 DUP ACK detected, add ssthresh {}, cwnd {}", ssthresh, cwnd);
             }
-            println!("  ->Current seqNum:{}, expected ACK:{}", seqNum, expectedAckNum);
+            println!("  -> Current seqNum:{}, expected ACK:{}", seqNum, expectedAckNum);
         }
         println!("Sent finished! Use time:{} seconds for 512MB", totalRunningTime.elapsed().unwrap().as_secs());
     } else { // TCP BBR
