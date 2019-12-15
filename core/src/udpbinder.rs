@@ -12,7 +12,6 @@ fn listen(socket: &UdpSocket, mut buffer: &mut [u8]) -> usize{
 fn send(socket: &UdpSocket, receiver: &str, msg: &Vec<u8>) -> usize{
     println!("Sending data......");
     let result = socket.send_to(msg, receiver).expect("Sending messages fail!");
-
     result
 }
 
@@ -23,7 +22,6 @@ fn bindAddress(addr : String) -> UdpSocket{
 
 fn main(){
     let args: Vec<String> = env::args().collect();
-    
     // Dispatch the arguments
     let address = &args[1];
     let mut mode: i8 = 0;
