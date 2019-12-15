@@ -11,18 +11,19 @@ fn unpackHeader(header : &[u8]) -> (i32, i32, i32){
     let mut port1 = [0; 4];
     let mut port2 = [0; 4];
     let mut idx : usize = 0;
-    for iidx in 0..3{
+    for iidx in 0..4{
         protocol[iidx] = header[idx];
         idx = idx + 1;
     }
-    for iidx in 0..3{
+    for iidx in 0..4{
         port1[iidx] = header[idx];
         idx = idx + 1;
     }
-    for iidx in 0..3{
+    for iidx in 0..4{
         port2[iidx] = header[idx];
         idx = idx + 1;
     }
+    println!("Unpacking: Port and protocol is : {}<-->{}, {}, final Idx {}", i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(protocol), idx);
     (i32::from_le_bytes(protocol), i32::from_le_bytes(port1), i32::from_le_bytes(port2))
 }
 
