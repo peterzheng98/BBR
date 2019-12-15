@@ -79,7 +79,7 @@ fn main(){
                 routerP2PSocket1.send_to(&recvBuf1, format!("127.0.0.1:{}", targetPort));
                 println!("[{}# - {}] Get packet from {:?} to port {} with size {}. Forwarded.", 1, packageIdx, src, targetPort, amt);
             } else {
-                println!("[{}# - {}] Get packet not fit the header, dropped.", 1, packageIdx)
+                println!("[{}# - {}] Get packet not fit the header, dropped.", 1, packageIdx);
             }
             packageIdx = packageIdx + 1;
         }
@@ -93,7 +93,41 @@ fn main(){
                 routerP2PSocket2.send_to(&recvBuf2, format!("127.0.0.1:{}", targetPort));
                 println!("[{}# - {}] Get packet from {:?} to port {} with size {}. Forwarded.", 2, packageIdx, src, targetPort, amt);
             } else {
-                println!("[{}# - {}] Get packet not fit the header, dropped.", 2, packageIdx)
+                println!("[{}# - {}] Get packet not fit the header, dropped.", 2, packageIdx);
+            }
+            packageIdx = packageIdx + 1;
+        }
+    });
+    let clientThread = thread::spawn(move || {
+        let mut packageIdx = 0;
+        // clientSocket.set_nonblocking(true).unwrap();
+        loop{
+            // Basic ideas: create a array with the incoming time.
+            // the receiver side only sent the package when the corresponding time is arrived.
+            // Currently this is non-waiting time version
+            let (amt, src) = clientSocket.recv_from(&mut recvBuf3).unwrap();
+            let (protocol, targetPort, srcPort) = unpackHeader(&recvBuf3);
+            if protocol == tcpProtocol {
+                clientSocket.send_to(&recvBuf3, format!("127.0.0.1:{}", targetPort));
+                println!("[{}# - {}] Get packet from {:?} to port {} with size {}. Forwarded.", 3, packageIdx, src, targetPort, amt);
+            } else {
+                println!("[{}# - {}] Get packet not fit the header, dropped.", 3, packageIdx);
+            }
+            packageIdx = packageIdx + 1;
+        }
+    });
+    let serverThread = thread::spawn(move || {
+        let mut packageIdx = 0;
+        // clientSocket.set_nonblocking(true).unwrap();
+        loop{
+            // Currently this is non-waiting time version
+            let (amt, src) = serverSocket.recv_from(&mut recvBuf4).unwrap();
+            let (protocol, targetPort, srcPort) = unpackHeader(&recvBuf4);
+            if protocol == tcpProtocol {
+                serverSocket.send_to(&recvBuf4, format!("127.0.0.1:{}", targetPort));
+                println!("[{}# - {}] Get packet from {:?} to port {} with size {}. Forwarded.", 4, packageIdx, src, targetPort, amt);
+            } else {
+                println!("[{}# - {}] Get packet not fit the header, dropped.", 4, packageIdx);
             }
             packageIdx = packageIdx + 1;
         }
