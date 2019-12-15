@@ -72,12 +72,13 @@ fn main(){
         let mut cwnd = 1;
         let mut cwndCount = cwnd;
         let clientSocket = UdpSocket::bind(format!("127.0.0.1:{}", clientPort)).unwrap();
-        while currentSentSize < totalSize{
+        let totalRunningTime = SystemTime::now();
+        let mut seqNum : i32 = 0;
+        let mut expectedAckNum : i32 = 0;
+        while expectedAckNum < 512 * 1024{
             // sent packet with 
             let localPortInfo = clientPort.to_le_bytes();
             let serverPortInfo = serverPort.to_le_bytes();
-            let mut seqNum : i32 = 0;
-            let mut expectedAckNum : i32 = 0;
             while cwndCount > 0{
                 let mut sentBuf = [0; (1024 + 32)];
 
@@ -122,6 +123,21 @@ fn main(){
                 if protocol == tcpProtocol{
                     if ackCount == expectedAckNum{
                         expectedAckNum = expectedAckNum + 1;
+                    } else {
+                        if !receivedACK.contains_key(&ackCount) {
+                            receivedACK.insert(ackCount, 1);
+                        } else {
+                            // the key exists
+                            if let Some(x) = receivedACK.get_mut(&ackCount) {
+                                *x += 1;
+                                if *x == 3{
+                                    duplicated = true;
+                                    success_recv = true;
+                                    seqNum = ackCount;
+                                }
+                            }
+                        }
+                        while receivedACK.contains_key(&expectedAckNum) {expectedAckNum = expectedAckNum + 1;}
                     }
                     if expectedAckNum == seqNum - 1{
                         success_recv = true;
@@ -134,10 +150,24 @@ fn main(){
                     }
                 }
             }
-
-
-
+            // modify the cwnd
+            // if timeout -> ssthresh = cwnd / 2, cwnd = 1
+            // if duplicated -> ssthresh = cwnd / 2, cwnd = ssthresh
+            if (!success_recv) && (!duplicated) {
+                ssthresh = cwnd / 2;
+                cwnd = 1;
+                println!("  ! Timeout detected, add ssthresh {}, cwnd {}", ssthresh, cwnd);
+            }
+            if (success_recv) && (duplicated) {
+                ssthresh = cwnd / 2;
+                cwnd = ssthresh;
+                println!("  ! 3 DUP ACK detected, add ssthresh {}, cwnd {}", ssthresh, cwnd);
+            }
+            println!("  ->Current seqNum:{}, expected ACK:{}", seqNum, expectedAckNum);
         }
+        println!("Sent finished! Use time:{} seconds for 512MB", totalRunningTime.elapsed().unwrap().as_secs());
+    } else { // TCP BBR
+
     }
 
 
