@@ -198,7 +198,7 @@ fn main(){
         let mut RTprop_min = 1024.0;
 
 //        let mut last_ack_time : collections::BTreeMap<i32, i32> = collections::BTreeMap::new();
-        let mut sendTime : collections::HashMap<i32, SystemTime> = HashMap::new();
+        let mut sendTime : collections::HashMap<i32, &SystemTime> = HashMap::new();
         let mut delivered_num : collections::HashMap<i32, i32> = HashMap::new();
         let mut inflight_num = 0;
 
@@ -206,7 +206,9 @@ fn main(){
         let mut rtt_round_seq_num = seqNum;
         let mut last_round_bw = 0;
 
+        let mut sent_packet_num = 0;
         while expectedAckNum < 512 * 1024{
+
             // sent packet with
             let localPortInfo = clientPort.to_le_bytes();
             let serverPortInfo = serverPort.to_le_bytes();
@@ -215,9 +217,13 @@ fn main(){
             let mut sendMargin = 0;
             while cwndCount > 0{
                 let mut cur_bdp : f64 = BtlBw_max as f64 * RTprop_min;
-                if inflight_num as f64 >= cur_bdp {
+                println!("Current_BDP is {}", cur_bdp);
+                println!("Current_Inflight_Num is {}", inflight_num);
+                if inflight_num as f64 > cur_bdp {
                     break;
                 }
+                println!("SystemTime Now is {:?}", SystemTime::now());
+                println!("NextSendTime is {:?}", nextSendTime);
                 if SystemTime::now() > nextSendTime {
                     let mut sentBuf = [0; 1024];
                     let seqInfo = seqNum.to_le_bytes();
@@ -249,8 +255,9 @@ fn main(){
                     let mut cur_time = SystemTime::now();
 
                     inflight_num = inflight_num + 1;
-                    sendTime.insert(seqNum, cur_time);
-                    delivered_num.insert(seqNum, inflight_num);
+                    sent_packet_num = sent_packet_num + 1;
+                    sendTime.insert(seqNum, &cur_time);
+                    delivered_num.insert(seqNum, sent_packet_num);
                     nextSendTime = cur_time + Duration::new(sendMargin, 0);
                     if rtt_round == 0{
                         rtt_round_seq_num = seqNum;
@@ -276,12 +283,17 @@ fn main(){
                 let (protocol, port1, port2, ackCount, ackFlag) = unpackACK(&RecvBuf);
                 if protocol == tcpProtocol{
                     let mut cur_time = SystemTime::now();
-                    let correspond_ackTime : SystemTime = *sendTime.get(&ackCount).unwrap();
+                    let correspond_ackTime : SystemTime = **sendTime.get(&ackCount).unwrap();
                     let correspond_ackDuration : Duration = correspond_ackTime.duration_since(correspond_ackTime).expect("Time failure in System::Time at flag 1");
+                    println!("correspond_ackDuration is {:?}", correspond_ackDuration);
                     let mut cur_rtt : f64 = (correspond_ackDuration.as_nanos() as f64) /  1000000.0;
+//                    let mut cur_rtt = 0.1;
                     // let mut cur_rtt = cur_time - Duration::new(sendTime.get(&ackCount), 0);
-                    let mut inflight_margin = inflight_num - *delivered_num.get(&ackCount).unwrap();
+                    let mut inflight_margin = sent_packet_num - *delivered_num.get(&ackCount).unwrap() + 1;
                     inflight_num = inflight_num - 1;
+                    println!("The delivered_num of ackCount {} is {}", ackCount, *delivered_num.get(&ackCount).unwrap());
+                    println!("inflight_margin is {}", inflight_margin);
+                    println!("cur_rtt is {}", cur_rtt);
                     let mut cur_bw = inflight_margin as f64 / cur_rtt;
                     if cur_bw > BtlBw_max as f64{
                         BtlBw_max = cur_bw.round() as i64;

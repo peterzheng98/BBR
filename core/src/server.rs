@@ -110,4 +110,13 @@ fn main(){
             serverSocket.send_to(&sentbuffer, format!("127.0.0.1:{}", routerPort));
         }
     }
+    else{
+        loop{
+            let (amt, src) = serverSocket.recv_from(&mut RecvBuf).unwrap();
+            let (protocol, port1, port2, seqCount, _) = unpackSeq(&RecvBuf);
+            println!("  - Server receives {}->{} seqCount:{} realSrc:{:?}", port2, port1, seqCount, src);
+            let mut sentbuffer = packACK(seqCount, port2, port1);
+            serverSocket.send_to(&sentbuffer, format!("127.0.0.1:{}", routerPort));
+        }
+    }
 }
