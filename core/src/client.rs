@@ -4,11 +4,36 @@ use std::io;
 use std::process;
 use std::str::FromStr;
 use std::thread;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::collections;
 use std::time::{Duration, SystemTime};
 use std::collections::HashMap;
 use std::f64;
+use std::io::prelude::*;
+use std::fs::OpenOptions;
+use std::fs::File;
 
+
+fn run_1(cwndSize: &Vec<i32>) -> io::Result<()> {
+    let path: &str = "reno.txt";
+
+    let mut output: File = File::create(path)?;
+    for i in cwndSize.iter(){
+        write!(output, "{}, ", i);
+    }
+    Ok(())
+}
+
+
+fn run_2(cwndSize: &Vec<i32>) -> io::Result<()> {
+    let path: &str = "bbr.txt";
+
+    let mut output: File = File::create(path)?;
+    for i in cwndSize.iter(){
+        write!(output, "{}, ", i);
+    }
+    Ok(())
+}
 // Usage: <Client Port> <Router Port> <Server Port> <Time> <Mode>
 // Sim-TCP Header 01 01 00 00 - TCP
 //                .. .. .. .. - Port 1
@@ -44,7 +69,7 @@ fn unpackACK(packet : &[u8]) -> (i32, i32, i32, i32, i32){
     } else {
         ackFlag = 0;
     }
-    println!("    = Unpacking ACK: Port and protocol: {} <--> {}, {}, ackflag {} acknum {}", i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(protocol), ackFlag, i32::from_le_bytes(ackCount));
+    // println!("    = Unpacking ACK: Port and protocol: {} <--> {}, {}, ackflag {} acknum {}", i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(protocol), ackFlag, i32::from_le_bytes(ackCount));
     (i32::from_le_bytes(protocol), i32::from_le_bytes(port1), i32::from_le_bytes(port2), i32::from_le_bytes(ackCount), ackFlag)
 }
 
@@ -74,18 +99,21 @@ fn main(){
     println!("  * Required sent size {} bytes, 1K bytes per packet. Assume waiting time is the same {} milliseconds.", totalSize, time);
     if mode == 2{ // Use reno
         println!("  * Use Reno Algorithm");
+        let mut cwnd_vec = Vec::new();
         let mut ssthresh = 128;
         let mut cwnd = 1;
         let mut cwndCount = cwnd;
         let clientSocket = UdpSocket::bind(format!("127.0.0.1:{}", clientPort)).unwrap();
+        let result = clientSocket.set_read_timeout(Some(Duration::new(1, 0)));
         let totalRunningTime = SystemTime::now();
         let mut seqNum : i32 = 0;
         let mut expectedAckNum : i32 = 0;
-        while expectedAckNum < 512 * 1024{
+        while expectedAckNum < 64 * 1024{
             // sent packet with
             let localPortInfo = clientPort.to_le_bytes();
             let serverPortInfo = serverPort.to_le_bytes();
             cwndCount = cwnd;
+            
             while cwndCount > 0{
                 let mut sentBuf = [0; 1024];
                 let seqInfo = seqNum.to_le_bytes();
@@ -123,14 +151,24 @@ fn main(){
             let mut duplicated : bool = false;
             let mut receivedACK : collections::BTreeMap<i32, i32> = collections::BTreeMap::new();
             let mut RecvBuf = [0; 1024];
-            while wait_ack_timeout.elapsed().unwrap().as_secs() < 2 && (!success_recv) {
+            while wait_ack_timeout.elapsed().unwrap().as_secs() < 1 && (!success_recv) {
+                println!("Time:{}, {}ns", wait_ack_timeout.elapsed().unwrap().as_secs(), wait_ack_timeout.elapsed().unwrap().as_nanos());
                 // set for timeout
-                let (amt, src) = clientSocket.recv_from(&mut RecvBuf).unwrap();
+                // let SocketResult = clientSocket.recv_from(&mut RecvBuf);
+                let mut amt : usize = 0;
+                let mut src : std::net::SocketAddr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+                match(clientSocket.recv_from(&mut RecvBuf)){
+                    Ok((_1, _2)) =>{
+                        amt = _1;
+                        src = _2;
+                    },
+                    Err(err) => println!("    Receive Error")
+                };
                 let (protocol, port1, port2, ackCount, ackFlag) = unpackACK(&RecvBuf);
                 if protocol == tcpProtocol{
                     if ackCount == expectedAckNum{
                         expectedAckNum = expectedAckNum + 1;
-                        success_recv = true;
+                        // success_recv = true;
                     } else {
                         if !receivedACK.contains_key(&ackCount) {
                             receivedACK.insert(ackCount, 1);
@@ -147,14 +185,16 @@ fn main(){
                         }
                         while receivedACK.contains_key(&expectedAckNum) {expectedAckNum = expectedAckNum + 1;}
                     }
-                    if expectedAckNum == seqNum - 1{
+                    if expectedAckNum == seqNum{
                         success_recv = true;
                         if cwnd > ssthresh{
                             cwnd = cwnd + 1; // TCP Congestion Control
+                            cwnd_vec.push(cwnd);
                         } else {
                             cwnd = cwnd * 2; // TCP Slow Start
+                            cwnd_vec.push(cwnd);
                         }
-                        println!("    - Client accept correct ACK, update cwnd");
+                        println!("    - Client accept correct ACK, update cwnd to {}, ssthresh {}", cwnd, ssthresh);
                     }
                 }
             }
@@ -162,25 +202,34 @@ fn main(){
             // if timeout -> ssthresh = cwnd / 2, cwnd = 1
             // if duplicated -> ssthresh = cwnd / 2, cwnd = ssthresh
             if (!success_recv) && (!duplicated) {
-                ssthresh = cwnd / 2;
+                ssthresh = cwnd / 2 + 1;
                 cwnd = 1;
-                println!("  ! Timeout detected, add ssthresh {}, cwnd {}", ssthresh, cwnd);
+                cwnd_vec.push(cwnd);
+                println!("  ! Timeout detected, add ssthresh {}, cwnd {}, current seq {} ", ssthresh, cwnd, seqNum);
             }
             if (success_recv) && (duplicated) {
-                ssthresh = cwnd / 2;
+                ssthresh = cwnd / 2 + 1;
                 cwnd = ssthresh;
-                println!("  ! 3 DUP ACK detected, add ssthresh {}, cwnd {}", ssthresh, cwnd);
+                cwnd_vec.push(cwnd);
+                println!("  ! 3 DUP ACK detected, add ssthresh {}, cwnd {}, current seq {} ", ssthresh, cwnd, seqNum);
             }
             println!("  -> Current seqNum:{}, expected ACK:{}", seqNum, expectedAckNum);
         }
-        println!("Sent finished! Use time:{} seconds for 512MB", totalRunningTime.elapsed().unwrap().as_secs());
+        let timesTotal = totalRunningTime.elapsed().unwrap().as_nanos();
+        for i in cwnd_vec.iter(){
+            print!("{}, ", i);
+        }
+        println!("Sent finished! Use time:{}ns for 512MB", timesTotal);
+        run_1(&cwnd_vec);
     }
     else { // TCP BBR
         println!("  * Use BBR Algorithm");
         let mut ssthresh = 128;
+        let mut cwnd_vec = Vec::new();
         let mut cwnd : i32 = 1;
         let mut cwndCount = cwnd;
         let clientSocket = UdpSocket::bind(format!("127.0.0.1:{}", clientPort)).unwrap();
+        let result = clientSocket.set_read_timeout(Some(Duration::new(1, 0)));
         let totalRunningTime = SystemTime::now();
         let mut seqNum : i32 = 0;
         let mut expectedAckNum : i32 = 0;
@@ -217,7 +266,7 @@ fn main(){
         let mut nextSendTime : SystemTime = SystemTime::now();
         let mut sendMargin : u128 = 0;
 
-        while expectedAckNum < 512 * 1024{
+        while expectedAckNum < 64 * 1024{
             println!("-------------In a new Round----------");
             // sent packet with
             let localPortInfo = clientPort.to_le_bytes();
@@ -274,18 +323,34 @@ fn main(){
                     seqNum = seqNum + 1;
                     cwndCount = cwndCount - 1;
                 }
+                if seqNum > 64 * 1024{
+                    break;
+                }
             }
             let wait_ack_timeout = SystemTime::now();
             let mut success_recv : bool = false;
             let mut duplicated : bool = false;
             let mut receivedACK : collections::BTreeMap<i32, i32> = collections::BTreeMap::new();
             let mut RecvBuf = [0; 1024];
-            while wait_ack_timeout.elapsed().unwrap().as_secs() < 2 && (!success_recv) {
+            while wait_ack_timeout.elapsed().unwrap().as_secs() < 1 && (!success_recv) {
                 // set for timeout
-                let (amt, src) = clientSocket.recv_from(&mut RecvBuf).unwrap();
+                // let (amt, src) = clientSocket.recv_from(&mut RecvBuf).unwrap();
+                let mut amt : usize = 0;
+                let mut src : std::net::SocketAddr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+                match(clientSocket.recv_from(&mut RecvBuf)){
+                    Ok((_1, _2)) =>{
+                        amt = _1;
+                        src = _2;
+                    },
+                    Err(err) => println!("    Receive Error")
+                };
                 let (protocol, port1, port2, ackCount, ackFlag) = unpackACK(&RecvBuf);
                 if protocol == tcpProtocol{
-
+                    if(ackCount >= 64 * 1024){
+                        success_recv = true;
+                        expectedAckNum = 64 * 2 * 1024;
+                        break;
+                    }
                     let correspond_ackTime : SystemTime = *sendTime.get(&ackCount).unwrap();//todo
                     let correspond_ackDuration : u128 = correspond_ackTime.elapsed().unwrap().as_nanos();
 
@@ -329,6 +394,7 @@ fn main(){
                                 pace_rate = startup_pace;
                             }
                             cwnd = (cwnd as f64 * pace_rate) as i32;
+                            cwnd_vec.push(cwnd);
                         },
                         1 => {
                             inflight = inflight_num as f64 * 1024.0;
@@ -341,6 +407,7 @@ fn main(){
                                 pace_rate = drain_pace;
                             }
                             cwnd = (cwnd as f64 * pace_rate) as i32;
+                            cwnd_vec.push(cwnd);
                         },
 
                         2 => {
@@ -369,10 +436,12 @@ fn main(){
                             }
 
                             cwnd = 2 * cwnd;
+                            cwnd_vec.push(cwnd);
                         },
 
                         3 => {
                             cwnd = 4;
+                            cwnd_vec.push(cwnd);
                             if SystemTime::now().duration_since(rtt_modify_time).expect("Time Error").as_micros() > 200{
                                 state = 0;
                             }
@@ -391,12 +460,22 @@ fn main(){
                     if expectedAckNum == seqNum{
                         success_recv = true;
                     }
+                    if expectedAckNum > 64 * 1024{
+                        break;
+                    }
                 }
             }
             println!("  -> Current seqNum:{}, expected ACK:{}", seqNum, expectedAckNum);
         }
-        println!("Sent finished! Use time:{} seconds for 512MB", totalRunningTime.elapsed().unwrap().as_secs());
+        let timesTotal = totalRunningTime.elapsed().unwrap().as_nanos();
+        println!("Sent finished! Use time:{} seconds for 512MB", totalRunningTime.elapsed().unwrap().as_nanos());
+        for i in cwnd_vec.iter(){
+            print!("{}, ", i);
+        }
+        println!("Sent finished! Use time:{}ns for 512MB", timesTotal);
+        run_2(&cwnd_vec);
     }
+
 
 
 }

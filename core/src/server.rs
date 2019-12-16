@@ -111,12 +111,24 @@ fn main(){
         }
     }
     else{
+        let mut culmative : i32 = 0;
+        let mut idx : i32 = 0;
         loop{
             let (amt, src) = serverSocket.recv_from(&mut RecvBuf).unwrap();
             let (protocol, port1, port2, seqCount, _) = unpackSeq(&RecvBuf);
-            println!("  - Server receives {}->{} seqCount:{} realSrc:{:?}", port2, port1, seqCount, src);
-            let mut sentbuffer = packACK(seqCount, port2, port1);
-            serverSocket.send_to(&sentbuffer, format!("127.0.0.1:{}", routerPort));
+            if idx % 1000 == 567{ 
+                idx = 1;
+                println!("  - Server Drops {}->{} seqCount:{} realSrc:{:?}, idx {}", port2, port1, seqCount, src, idx);
+            } else {
+                println!("  - Server receives {}->{} seqCount:{} realSrc:{:?}", port2, port1, seqCount, src);
+                let mut sentbuffer = packACK(culmative, port2, port1);
+                if seqCount == culmative{
+                    culmative = culmative + 1;
+                }
+                serverSocket.send_to(&sentbuffer, format!("127.0.0.1:{}", routerPort));
+                idx = idx + 1;
+            }
+            
         }
     }
 }
