@@ -7,6 +7,7 @@ use std::thread;
 use std::collections;
 use std::time::{Duration, SystemTime};
 use std::collections::HashMap;
+use std::f64;
 
 // Usage: <Client Port> <Router Port> <Server Port> <Time> <Mode>
 // Sim-TCP Header 01 01 00 00 - TCP
@@ -194,11 +195,11 @@ fn main(){
         let mut cur_bw_pace_index = 0;
 
         let mut BtlBw_max = 0;
-        let mut RTprop_min = 1024;
+        let mut RTprop_min = 1024.0;
 
 //        let mut last_ack_time : collections::BTreeMap<i32, i32> = collections::BTreeMap::new();
-        let mut sendTime = HashMap::new();
-        let mut delivered_num = HashMap::new();
+        let mut sendTime : collections::HashMap<i32, SystemTime> = HashMap::new();
+        let mut delivered_num : collections::HashMap<i32, i32> = HashMap::new();
         let mut inflight_num = 0;
 
         let mut rtt_round = 0;
@@ -213,8 +214,8 @@ fn main(){
             let mut nextSendTime = SystemTime::now();
             let mut sendMargin = 0;
             while cwndCount > 0{
-                let mut cur_bdp = BtlBw_max * RTprop_min;
-                if inflight_num >= cur_bdp {
+                let mut cur_bdp : f64 = BtlBw_max as f64 * RTprop_min;
+                if inflight_num as f64 >= cur_bdp {
                     break;
                 }
                 if SystemTime::now() > nextSendTime {
@@ -266,7 +267,7 @@ fn main(){
             let mut receivedACK : collections::BTreeMap<i32, i32> = collections::BTreeMap::new();
             let mut RecvBuf = [0; 1024];
 
-            let mut rtt_modify_time = SystemTime::now();
+            let mut rtt_modify_time : SystemTime = SystemTime::now();
             let mut rtt_modify_delta = 0;
             let mut bw_low_increase_cnt = 0;
             while wait_ack_timeout.elapsed().unwrap().as_secs() < 2 && (!success_recv) {
@@ -275,14 +276,18 @@ fn main(){
                 let (protocol, port1, port2, ackCount, ackFlag) = unpackACK(&RecvBuf);
                 if protocol == tcpProtocol{
                     let mut cur_time = SystemTime::now();
-                    let mut cur_rtt = cur_time - Duration::new(sendTime.get(&ackCount), 0);
-                    let mut inflight_margin = inflight_num - delivered_num.get(&ackCount);
+                    let correspond_ackTime : SystemTime = *sendTime.get(&ackCount).unwrap();
+                    let correspond_ackDuration : Duration = correspond_ackTime.duration_since(correspond_ackTime).expect("Time failure in System::Time at flag 1");
+                    let mut cur_rtt : f64 = (correspond_ackDuration.as_nanos() as f64) /  1000000.0;
+                    // let mut cur_rtt = cur_time - Duration::new(sendTime.get(&ackCount), 0);
+                    let mut inflight_margin = inflight_num - *delivered_num.get(&ackCount).unwrap();
                     inflight_num = inflight_num - 1;
-                    let mut cur_bw = inflight_margin / cur_rtt;
-                    if cur_bw > BtlBw_max{
-                        BtlBw_max = cur_bw;
+                    let mut cur_bw = inflight_margin as f64 / cur_rtt;
+                    if cur_bw > BtlBw_max as f64{
+                        BtlBw_max = cur_bw.round() as i64;
                     }
-                    rtt_modify_delta = SystemTime::now() - rtt_modify_time;
+                    let currentTimeforRTT : SystemTime = SystemTime::now();
+                    rtt_modify_delta = (currentTimeforRTT.duration_since(rtt_modify_time).expect("Time failure in System::Time at flag 2")).as_secs();
                     if rtt_modify_delta > 10{
                         rtt_modify_delta = 0;
                         rtt_modify_time = SystemTime::now();
@@ -295,14 +300,14 @@ fn main(){
                         RTprop_min = cur_rtt;
                     }
                     let mut pace_rate = 0.0;
-                    let mut cur_bdp = BtlBw_max * RTprop_min;
+                    let mut cur_bdp = BtlBw_max as f64 * RTprop_min;
                     match state {
                         0 => {
                             if ackCount == rtt_round_seq_num && rtt_round == 1{
-                                if cur_bw < (1.0 + 0.25) * last_round_bw{
+                                if cur_bw < (1.0 + 0.25) * last_round_bw as f64{
                                     bw_low_increase_cnt = bw_low_increase_cnt + 1;
                                 }
-                                last_round_bw = cur_bw;
+                                last_round_bw = cur_bw.round() as i64;
                                 rtt_round = 0;
                             }
                             if bw_low_increase_cnt > 3{
@@ -312,10 +317,10 @@ fn main(){
                             else {
                                 pace_rate = startup_pace;
                             }
-                            cwnd = cwnd * pace_rate;
+                            cwnd = (cwnd as f64 * pace_rate) as i64;
                         },
                         1 => {
-                            if cur_bdp >= inflight_num{
+                            if cur_bdp >= inflight_num as f64{
                                 state = 2;
                                 pace_rate = bw_pacing_gain[cur_bw_pace_index];
                                 cur_bw_pace_index = (cur_bw_pace_index + 1) % 8;
@@ -323,7 +328,7 @@ fn main(){
                             else{
                                 pace_rate = drain_pace;
                             }
-                            cwnd = cwnd * pace_rate;
+                            cwnd = (cwnd as f64 * pace_rate) as i64;
                         },
 
                         2 => {
@@ -335,12 +340,12 @@ fn main(){
                                 }
                             }
                             else if pace_rate > 1.0{
-                                if cur_rtt > RTprop_min && inflight_num >= cur_bdp{
+                                if cur_rtt > RTprop_min && inflight_num as f64 >= cur_bdp{
                                     next_pace = 1;
                                 }
                             }
                             else{
-                                if cur_rtt > RTprop_min || inflight_num <= cur_bdp{
+                                if cur_rtt > RTprop_min || inflight_num as f64 <= cur_bdp{
                                     next_pace = 1;
                                 }
                             }
@@ -352,7 +357,7 @@ fn main(){
 
                         3 => {
                             cwnd = 4;
-                            if SystemTime::now() - rtt_modify_time > 200{
+                            if SystemTime::now().duration_since(rtt_modify_time).expect("Time Error").as_micros() > 200{
                                 state = 0;
                             }
                             pace_rate = rtt_pace;
@@ -363,7 +368,7 @@ fn main(){
                         },
 
                     };
-                    sendMargin = 1024.0 / (pace_rate * BtlBw_max);
+                    sendMargin = (1024.0 / (pace_rate * (BtlBw_max as f64))).round() as u64;
 
                     if ackCount == expectedAckNum{
                         expectedAckNum = expectedAckNum + 1;

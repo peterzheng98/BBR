@@ -1,4 +1,7 @@
+use std::time::SystemTime;
+
 fn main(){
+    let at = SystemTime::now();
     println!("hello world");
     let mut a : i32 = 1;
     let mut b : i32 = a;
@@ -9,5 +12,7 @@ fn main(){
     println!("{}", a);
     println!("{}", b);
     println!("{}", c);
+    let b2 = at.duration_since(at).expect("111");
+    println!("{:?}", b2);
 
 }
