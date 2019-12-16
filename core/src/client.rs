@@ -12,7 +12,7 @@ use std::f64;
 use std::io::prelude::*;
 use std::fs::OpenOptions;
 use std::fs::File;
-
+use std::cmp;
 
 fn run_1(cwndSize: &Vec<i32>) -> io::Result<()> {
     let path: &str = "reno.txt";
@@ -25,7 +25,7 @@ fn run_1(cwndSize: &Vec<i32>) -> io::Result<()> {
 }
 
 
-fn run_2(cwndSize: &Vec<i32>) -> io::Result<()> {
+fn run_2(cwndSize: &Vec<i128>) -> io::Result<()> {
     let path: &str = "bbr.txt";
 
     let mut output: File = File::create(path)?;
@@ -226,7 +226,7 @@ fn main(){
         println!("  * Use BBR Algorithm");
         let mut ssthresh = 128;
         let mut cwnd_vec = Vec::new();
-        let mut cwnd : i32 = 1;
+        let mut cwnd : i128 = 1;
         let mut cwndCount = cwnd;
         let clientSocket = UdpSocket::bind(format!("127.0.0.1:{}", clientPort)).unwrap();
         let result = clientSocket.set_read_timeout(Some(Duration::new(1, 0)));
@@ -266,6 +266,9 @@ fn main(){
         let mut nextSendTime : SystemTime = SystemTime::now();
         let mut sendMargin : u128 = 0;
 
+        let mut last_bw : f64 = 0.0;
+        let mut low_increase_cnt : i32 = 0;
+
         while expectedAckNum < 64 * 1024{
             println!("-------------In a new Round----------");
             // sent packet with
@@ -276,6 +279,8 @@ fn main(){
             let mut cur_bdp : f64 = BtlBw_max  * (RTprop_min as f64);
             println!("  Current_State -> {}", state);
             println!("  Current_BDP -> {}", cur_bdp);
+            println!("  Max BW  -> {}", BtlBw_max);
+            println!("  Min RTT -> {}", RTprop_min);
             while cwndCount > 0{
                 inflight = inflight_num as f64 * 1024.0;
                 cur_time = SystemTime::now();
@@ -346,119 +351,156 @@ fn main(){
                 };
                 let (protocol, port1, port2, ackCount, ackFlag) = unpackACK(&RecvBuf);
                 if protocol == tcpProtocol{
-                    if(ackCount >= 64 * 1024){
+                    if(ackCount >= 64 * 1024) {
                         success_recv = true;
                         expectedAckNum = 64 * 2 * 1024;
                         break;
                     }
-                    let correspond_ackTime : SystemTime = *sendTime.get(&ackCount).unwrap();//todo
-                    let correspond_ackDuration : u128 = correspond_ackTime.elapsed().unwrap().as_nanos();
+                    if ackCount == expectedAckNum{
+                        println!("ackCount is {}", ackCount);
+                        println!("cwnd is {}", cwnd);
+                        println!("state is {}", state);
+                        let correspond_ackTime : SystemTime = *sendTime.get(&ackCount).unwrap();//todo
+                        let correspond_ackDuration : u128 = correspond_ackTime.elapsed().unwrap().as_nanos();
 
-                    let mut cur_rtt : u128 = correspond_ackDuration; //unit: ns
-                    let mut inflight_margin : i32 = sent_packet_num - *delivered_num.get(&ackCount).unwrap() + 1;
-                    inflight_num = inflight_num - 1;
+                        let mut cur_rtt : u128 = correspond_ackDuration; //unit: ns
+                        let mut inflight_margin : i32 = sent_packet_num - *delivered_num.get(&ackCount).unwrap() + 1;
+                        inflight_num = inflight_num - 1;
 
-                    let mut cur_bw : f64 = inflight_margin as f64 * 1024.0 / cur_rtt as f64; // bytes/ns
+                        let mut cur_bw : f64 = inflight_margin as f64 * 1024.0 / cur_rtt as f64; // bytes/ns
 
-                    if cur_bw > BtlBw_max{
-                        BtlBw_max = cur_bw;
-                    }
-                    let rtt_modify_delta: u128 = rtt_modify_time.elapsed().unwrap().as_nanos();
-                    if rtt_modify_delta > 10 * 1000000000{
-                        rtt_modify_time = SystemTime::now();
-                        RTprop_min = cur_rtt;
-                        state = 3;
-                    }
-                    else if cur_rtt < RTprop_min && !(state == 3){
-                        rtt_modify_time = SystemTime::now();
-                        RTprop_min = cur_rtt;
-                    }
+                        if cur_bw > BtlBw_max{
+                            BtlBw_max = cur_bw;
+                        }
+                        let rtt_modify_delta: u128 = rtt_modify_time.elapsed().unwrap().as_nanos();
+                        println!("  RTT_Modify_Delta is {}", rtt_modify_delta);
+                        if rtt_modify_delta > 10 * 1000000000{
+                            rtt_modify_time = SystemTime::now();
+                            RTprop_min = cur_rtt;
+                            state = 3;
+                        }
+                        else if cur_rtt < RTprop_min && !(state == 3){
+                            rtt_modify_time = SystemTime::now();
+                            RTprop_min = cur_rtt;
+                        }
 
-                    let mut pace_rate : f64 = 0.0;
-                    let mut cur_bdp = BtlBw_max * (RTprop_min as f64);
-                    match state {
-                        0 => {
-                            if ackCount == rtt_round_seq_num && rtt_round{
-                                if cur_bw < (1.0 + 0.25) * last_round_bw{
-                                    bw_low_increase_cnt = bw_low_increase_cnt + 1;
+                        let mut pace_rate : f64 = 0.0;
+                        let mut cur_bdp = BtlBw_max * (RTprop_min as f64);
+                        match state {
+                            0 => {
+//                                if ackCount == rtt_round_seq_num && rtt_round{
+//                                    if cur_bw < (1.0 + 0.25) * last_round_bw{
+//                                        bw_low_increase_cnt = bw_low_increase_cnt + 1;
+//                                    }
+//                                    last_round_bw = cur_bw;
+//                                    rtt_round = false;
+//                                }
+//                                if bw_low_increase_cnt > 3{
+//                                    pace_rate = drain_pace;
+//                                    state = 1;
+//                                    bw_low_increase_cnt = 0;
+//                                }
+//                                else {
+//                                    pace_rate = startup_pace;
+//                                }
+                                if cur_bw < (1.0 + 0.25) * last_bw{
+                                    low_increase_cnt = low_increase_cnt + 1;
                                 }
-                                last_round_bw = cur_bw;
-                                rtt_round = false;
-                            }
-                            if bw_low_increase_cnt > 3{
-                                pace_rate = drain_pace;
-                                state = 1;
-                                bw_low_increase_cnt = 0;
-                            }
-                            else {
-                                pace_rate = startup_pace;
-                            }
-                            cwnd = (cwnd as f64 * pace_rate) as i32;
-                            cwnd_vec.push(cwnd);
-                        },
-                        1 => {
-                            inflight = inflight_num as f64 * 1024.0;
-                            if cur_bdp >= inflight{
-                                state = 2;
+                                last_bw = cur_bw;
+                                if low_increase_cnt > 10{
+                                    pace_rate = drain_pace;
+                                    state = 1;
+                                    low_increase_cnt = 0;
+                                }
+                                else{
+                                    pace_rate = startup_pace;
+                                }
+                                cwnd = cmp::min((cwnd as f64 * pace_rate) as i128, std::i32::MAX as i128);
+                                cwnd_vec.push(cwnd);
+                            },
+                            1 => {
+                                inflight = inflight_num as f64 * 1024.0;
+                                if cur_bdp <= inflight{
+                                    state = 2;
+                                    pace_rate = bw_pacing_gain[cur_bw_pace_index];
+                                    cur_bw_pace_index = (cur_bw_pace_index + 1) % 8;
+                                }
+                                else{
+                                    pace_rate = drain_pace;
+                                }
+                                cwnd = cmp::min((cwnd as f64 * pace_rate) as i128, std::i32::MAX as i128);
+                                cwnd_vec.push(cwnd);
+                            },
+
+                            2 => {
+                                inflight = inflight_num as f64 * 1024.0;
                                 pace_rate = bw_pacing_gain[cur_bw_pace_index];
-                                cur_bw_pace_index = (cur_bw_pace_index + 1) % 8;
-                            }
-                            else{
-                                pace_rate = drain_pace;
-                            }
-                            cwnd = (cwnd as f64 * pace_rate) as i32;
-                            cwnd_vec.push(cwnd);
-                        },
+                                let mut next_pace : bool = false;
+                                if pace_rate == 1.0{
+                                    if cur_rtt > RTprop_min{
+                                        next_pace = true;
+                                    }
 
-                        2 => {
-                            inflight = inflight_num as f64 * 1024.0;
-                            pace_rate = bw_pacing_gain[cur_bw_pace_index];
-                            let mut next_pace : bool = false;
-                            if pace_rate == 1.0{
-                                if cur_rtt > RTprop_min{
-                                    next_pace = true;
+                                }
+                                else if pace_rate > 1.0{
+                                    if cur_rtt > RTprop_min && inflight >= cur_bdp{
+                                        next_pace = true;
+                                    }
+                                }
+                                else{
+                                    if cur_rtt > RTprop_min || inflight <= cur_bdp{
+                                        next_pace = true;
+                                    }
+
+                                }
+                                if next_pace {
+                                    cur_bw_pace_index = (cur_bw_pace_index + 1) % 8;
                                 }
 
-                            }
-                            else if pace_rate > 1.0{
-                                if cur_rtt > RTprop_min && inflight >= cur_bdp{
-                                    next_pace = true;
+                                cwnd = cmp::min(2 * cwnd, std::i32::MAX as i128);
+                                cwnd_vec.push(cwnd);
+                            },
+
+                            3 => {
+                                cwnd = 4;
+                                cwnd_vec.push(cwnd);
+                                if SystemTime::now().duration_since(rtt_modify_time).expect("Time Error").as_micros() > 200{
+                                    state = 0;
                                 }
-                            }
-                            else{
-                                if cur_rtt > RTprop_min || inflight <= cur_bdp{
-                                    next_pace = true;
-                                }
+                                pace_rate = rtt_pace;
+                            },
+                            _ =>{
+                                break;
+                            },
 
-                            }
-                            if next_pace {
-                                cur_bw_pace_index = (cur_bw_pace_index + 1) % 8;
-                            }
-
-                            cwnd = 2 * cwnd;
-                            cwnd_vec.push(cwnd);
-                        },
-
-                        3 => {
+                        };
+                        sendMargin = (1024.0 / (pace_rate * BtlBw_max)) as u128 ;
+                        expectedAckNum = expectedAckNum + 1;
+                    }
+                    else{
+                        let rtt_modify_delta: u128 = rtt_modify_time.elapsed().unwrap().as_nanos();
+                        println!("  RTT_Modify_Delta is {}", rtt_modify_delta);
+                        if rtt_modify_delta > 10 * 1000000000{
+                            rtt_modify_time = SystemTime::now();
+                            state = 3;
+                        }
+                        if state == 3{
+                            let mut pace_rate : f64 = 0.0;
+                            println!("in this mode");
                             cwnd = 4;
                             cwnd_vec.push(cwnd);
                             if SystemTime::now().duration_since(rtt_modify_time).expect("Time Error").as_micros() > 200{
                                 state = 0;
                             }
                             pace_rate = rtt_pace;
-                        },
-
-                        _ =>{
-                            break;
-                        },
-
-                    };
-                    sendMargin = (1024.0 / (pace_rate * BtlBw_max)) as u128 ;
-                    if ackCount == expectedAckNum{
-                        expectedAckNum = expectedAckNum + 1;
+                            sendMargin = (1024.0 / (pace_rate * BtlBw_max)) as u128 ;
+                        }
                     }
                     if expectedAckNum == seqNum{
                         success_recv = true;
+                    }
+                    else{
+                        seqNum = expectedAckNum;
                     }
                     if expectedAckNum > 64 * 1024{
                         break;
